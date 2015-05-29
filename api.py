@@ -280,6 +280,7 @@ class MessageCenterLogic(object):
             self.messageReceivedCallback(mid,mtext,mfrom,mdate,mattachments)
         else:
             print("NEW MESSAGE: [%s] %s> %s [@%s [%s"%(mid,mfrom.username,mtext,mdate,mattachments))
+            
     def onMessageViewed(self,mid,convid,mwho):
         if self.messageViewedCallback:
             self.messageViewedCallback(mid,convid,mwho)
@@ -289,7 +290,6 @@ class MessageCenterLogic(object):
     def postLastViewedUpdate(self,conversation):
         convId=conversation['id']
         self.logger.debug("Last viewed message shall be updated for %s"%(convId,))
-        #TODO Post it!
         for participant in conversation['participants']:
             if participant['accountId']==self.myId:
                 if int(participant['lastViewedMessageId'])<int(self.lastViewedUpdates[convId]):

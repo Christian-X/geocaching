@@ -1,10 +1,11 @@
+
 import logging
 import sleekxmpp
 import json
 
 from sleekxmpp.componentxmpp import ComponentXMPP
 from sleekxmpp.stanza import Error
-from sleekxmpp.xmlstream.matcher import MatchXPath
+from sleekxmpp.xmlstream.matcher import MatchXPath,StanzaPath
 from sleekxmpp.xmlstream.handler import Callback
 
 import threading
@@ -94,7 +95,7 @@ class AUser(object):
     def messageDisplayed(self,message):
         if self.mcConnection==None:
             return False
-        toMcUser=self.mcConnection.getUserByName(message['to'].user,lookUp=False)
+        toMcUser=self.mcConnection.getUserById(message['to'].user)
         if not toMcUser:
             return False
         if not toMcUser.convId:
@@ -103,8 +104,8 @@ class AUser(object):
         
     def handleMessage(self,message):
         if self.mcConnection==None:
-            return False        
-        toMcUser=self.mcConnection.getUserByName(message['to'].user)
+            return False
+        toMcUser=self.mcConnection.getUserById(message['to'].user)
         if not toMcUser:
             return False
         if not message['body']:
@@ -123,7 +124,7 @@ class AUser(object):
             ack['cm_received']=message['id']
             ack.send()
 
-        mcId=self.mcConnection.sendMessage(message['to'].user,message['body'])
+        mcId=self.mcConnection.sendMessage(toMcUser.username,message['body'])
         if mcId:
             if message['id']:
                 self.mapId(message['to'].user,message['id'],mcId)
@@ -153,21 +154,27 @@ class AUser(object):
         if self.mcConnection:
             self.mcConnection.login()
             self.speak("Login as %s successfull"%(self.gcUser,))
-    userLookup={} #jid.username =>mcUsername
-    
-    def lookupByJid(self,jid):
-        for user in self.userLookup:
-            if user.lower()==jid.user.lower():
+            self.updatePresence()
+            
+    def updatePresence(self):
+        for user in self.mcConnection.users.values():
+            try:
+                presence=self.xmpp.Presence()
+                presence['from']=self.makeJid(user)
+                presence['to']=self.jid
+                presence['type']='available'                
+                presence.send()
+                nickMsg=self.xmpp.Message()
+                nickMsg['from']=self.makeJid(user)
+                nickMsg['to']=self.jid
+                nickMsg['nick']=user.username
+                nickMsg.send()
+            except sleekxmpp.jid.InvalidJID:
                 pass
+    
 
     def makeJid(self,mcUser):
-        return sleekxmpp.JID("%s@gc.geheimergarten.de"%(mcUser.username,))
-        #if mcUser.username in self.userLookup.values():
-        #    for user in self.userLookup:
-        #        if self.userLookup[user].lower()==mcUser.lower():
-        #            return sleekxmpp.JID("%s@gc.geheimergarten.de"%(self.userLookup[user],))
-        #xmppValidId=mcUser.username.replace("@","").replace(")","").replace("(","").replace("-","")
-        #userLookup[xmppValidId]=mcUser.username
+        return sleekxmpp.JID("%s@gc.geheimergarten.de"%(mcUser.uuid,))
 
     def onMCMessageViewed(self,mid,convid,mwho):
         try:
@@ -175,7 +182,6 @@ class AUser(object):
         except sleekxmpp.jid.InvalidJID:
             self.logger.debug("displayed// Invalid JID %s"%(mwho,))
             return
-
         xmppId=self.lookUpId(msgFrom.user,mid)
         if xmppId:
             marker=self.xmpp.Message()
@@ -195,6 +201,7 @@ class AUser(object):
         msg=self.xmpp.Message()
         msg['to']=self.jid
         msg['id']=mid
+        msg['nick']=mfrom.username
         try:
             msg['from']=self.makeJid(mfrom)
         except sleekxmpp.jid.InvalidJID as e:
@@ -287,17 +294,42 @@ class MyComponent(ComponentXMPP):
         self.add_event_handler("receipt_received",self.receipt_received)
         self.add_event_handler("session_start",self.start)
         self.add_event_handler("killed",self.shutdown)
+#        self.add_event_handler("disco_info_query",self.info_query)
+#        self.add_event_handler("disco_items_query",self.items_query)
         self.register_handler(Callback("cm_displayed",
                                  MatchXPath("{%s}message/{urn:xmpp:chat-markers:0}displayed"%(self.default_ns,)),
                                  self.message_displayed))
         self.logger=logging.getLogger("Component")
         self.config=config
+        self.remove_handler('VCardTemp')
+        self.register_handler(Callback('MyVCardTemp',
+                              StanzaPath('iq/vcard_temp'),
+                              self.handleVCard))
+        
 
+    def handleVCard(self,iq):
+        if iq['type']=='result':
+            pass
+        if iq['type']=='get':
+            if isBot(iq):
+                from sleekxmpp.plugins.xep_0054 import VCardTemp
+                vcard=VCardTemp()
+                vcard['NICKNAME']="JustABot"
+                iq.reply()
+                iq.append(vcard)
+                iq.send()
+            else:
+                self.logger.debug("ToHandle...")
+        
     def start(self,arg):
+        self.remove_handler('VCardTemp')
+#        vcard=self['xep_0054'].get_vcard(self.config.bot,cached=True)
+        #self['xep_0054'].publish_vcard(vcard=vcard,jid=self.config.bot)
         import base64
 #        with open("my-avatar.jpg","rb") as fd:
 #            self.avatar=fd.read()
 #            c['xep_0153'].set_avatar(jid=sleekxmpp.JID("gc.geheimergarten.de"),mtype="image/jpeg",avatar=base64.b64encode(data))
+
 
         for user in self.config.users:
             if user.active:
@@ -305,6 +337,11 @@ class MyComponent(ComponentXMPP):
                 botPresence['from']=config.bot
                 botPresence['to']=user.jid
                 botPresence.send()
+                msg=self.Message()
+                msg['from']=config.bot
+                msg['to']=user.jid
+                msg['nick']="GC MessageCenter Control [%s]"%(user.gcUser)
+                msg.send()
                 botPresence['type']="probe"
                 botPresence.send()
         self.schedule("mcpoll",12,self.poll,repeat=True)
@@ -320,7 +357,6 @@ class MyComponent(ComponentXMPP):
             if user.active:
                 botPresence=self.Presence()
                 botPresence['from']=self.config.bot.bare
-                botPresence['to']=user.jid
                 botPresence['type']="unavailable"
                 botPresence.send()
         
@@ -492,7 +528,7 @@ if __name__ == '__main__':
     config.store()
     
     c.registerPlugin('xep_0030')
-#    c.registerPlugin('xep_0054')
+    c.registerPlugin('xep_0054')
     c.registerPlugin('xep_0086')
     c.registerPlugin('xep_0199')
     c.registerPlugin('xep_0184')
