@@ -5,7 +5,7 @@ import itertools
 import os
 import time
 
-checkTime=False
+checkTime=True
 caches=[]
 readCodes=set()  
 for f in sys.argv[1:]:
@@ -116,9 +116,9 @@ def search(startIndex,soFar,found,checkTime,caches):
                 if last:
                     totalDistance=totalDistance+el.distanceTo(last)
                 last=el
-                
+                    
         founds.append(Match(distanceSorted,totalDistance,checked))
-        print ("MATCH ["," ".join(c.code for c in distanceSorted),"]","[++"," ".join(c.code for c in unsorted))
+        print ("MATCH ",not checkTime,"["," ".join(c.code for c in distanceSorted),"]","[++"," ".join(c.code for c in unsorted))
         if (len(founds)%15==0 or len(founds)<10):
             outputAll()
         return
@@ -129,8 +129,8 @@ def search(startIndex,soFar,found,checkTime,caches):
         timeValid=True
         if checkTime:
             timeValid=False
-            times=(c.found for c in found)
-            if caches[startIndex].found and caches[startIndex].found in times:
+            times=[c.found for c in found]
+            if caches[startIndex].found in times:
                 timeValid=True
         noDups=True
         for c in caches[startIndex].code[2:]:
