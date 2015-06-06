@@ -97,7 +97,7 @@ class AUser(object):
             return False
         toMcUser=self.mcConnection.getUserById(message['to'].user)
         if not toMcUser:
-            return False
+              return False
         if not toMcUser.convId:
             return False
         self.mcConnection.updateLastViewed(toMcUser.convId,message['cm_displayed'])
@@ -229,12 +229,17 @@ class AUser(object):
             
             
 class Config(object):
-    COMPONENT_NAME="gc.geheimergarten.de"
-    COMPONENT_SECRET="supersecret"
-    bot=sleekxmpp.JID("gc.geheimergarten.de/bot")
+    COMPONENT_NAME="tbd"
+    COMPONENT_SECRET="tbd"
     
     def __init__(self):
         self.users=[]
+        self.calcId()
+        self.toXmpp=None
+        
+    def calcId(self):
+        self.bot=sleekxmpp.JID(self.COMPONENT_NAME+"/bot")
+
 
     def setToXmpp(self,toXmpp):
         self.toXmpp=toXmpp
@@ -252,11 +257,19 @@ class Config(object):
     def load(self):
         f=open("config","r")
         myStore=json.load(f)
+        if "COMPONENT_NAME" in myStore:
+            self.COMPONENT_NAME=myStore["COMPONENT_NAME"]
+        if "COMPONENT_SECRET" in myStore:
+            self.COMPONENT_SECRET=myStore["COMPONENT_SECRET"]
+        if self.toXmpp==None:
+            return
+        
         if "users" in myStore:
             for userjson in myStore["users"]:
                 user=AUser(None,self.toXmpp)
                 user.load(userjson)
                 self.users.append(user)
+        self.calcId()
                 
     def delUser(self,jid):
         user=self._lookup(jid)
@@ -522,9 +535,10 @@ class MyComponent(ComponentXMPP):
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
     config=Config()
-    c=MyComponent(config.COMPONENT_NAME,config.COMPONENT_SECRET,config)
-    config.setToXmpp(c)
     config.load()
+    c=MyComponent(config.COMPONENT_NAME,config.COMPONENT_SECRET,config)
+    config.load()
+    config.setToXmpp(c)
     config.store()
     
     c.registerPlugin('xep_0030')
@@ -537,7 +551,6 @@ if __name__ == '__main__':
     c['xep_0184'].auto_ack=False
     c['xep_0184'].auto_request=False
     c.registerPlugin('xep_0071')
-
     
     if c.connect():
         c.process(block=True)
