@@ -16,6 +16,7 @@ import xep_0333
 def isBot(stanza):
     return stanza['to'].user==config.bot.user
 
+admin=sleekxmpp.JID("chris@geheimergarten.de")
 
 class AUser(object):
     def __init__(self,jid,xmpp):
@@ -102,6 +103,30 @@ class AUser(object):
             return False
         self.mcConnection.updateLastViewed(toMcUser.convId,message['cm_displayed'])
         
+    def handleControlMsg(self,message):
+        if message['body']=="status":
+            message.reply()
+            message['body']="Geocaching user %s"%(self.gcUser,)
+            message.send()
+            message['body']="Online :%s"%(self.mcConnection!=None,)
+            message.send()
+        elif message['body'].startswith("user "):
+            self.gcUser=message['body'][len("user "):]        
+        elif message['body'].startswith("pass "):
+            self.gcPass=message['body'][len("pass "):]
+            if self.online:
+                self.setOnline()
+        elif message['body']=="logout":
+            message.reply()
+            message['body']="Okay, logging out"
+            message.send()
+            self.logout()
+        elif message['body']=="login":
+            message.reply()
+            message['body']="Okay, logging in"
+            message.send()
+            self.login()            
+        
     def handleMessage(self,message):
         if self.mcConnection==None:
             return False
@@ -156,13 +181,19 @@ class AUser(object):
             self.speak("Login as %s successfull"%(self.gcUser,))
             self.updatePresence()
             
+    def handlePresence(self,presence):
+        self.logger.debug("Received presence: %s"%(presence,))
+        
     def updatePresence(self):
         for user in self.mcConnection.users.values():
             try:
                 presence=self.xmpp.Presence()
                 presence['from']=self.makeJid(user)
                 presence['to']=self.jid
-                presence['type']='available'                
+                presence['type']='available'
+                presence['vcard_temp_update']['photo']='xyzxyz'
+                presence.send()
+                presence['type']='subscribe'
                 presence.send()
                 nickMsg=self.xmpp.Message()
                 nickMsg['from']=self.makeJid(user)
@@ -172,9 +203,8 @@ class AUser(object):
             except sleekxmpp.jid.InvalidJID:
                 pass
     
-
     def makeJid(self,mcUser):
-        return sleekxmpp.JID("%s@gc.geheimergarten.de"%(mcUser.uuid,))
+        return sleekxmpp.JID("%s@%s"%(mcUser.uuid,config.COMPONENT_NAME))
 
     def onMCMessageViewed(self,mid,convid,mwho):
         try:
@@ -191,7 +221,6 @@ class AUser(object):
             marker.send()
         else:
             self.logger.debug("Could not look up Message Id %s"%(mid,))
-        
         
     def onMCMessageReceived(self,mid,mtext,mfrom,mdate,mattachments):
         if mfrom==self.mcConnection.thisUser:
@@ -217,25 +246,27 @@ class AUser(object):
         msg.send()
         
 
-        
     def setOffline(self):
         self.online=False
         self.logout()
         
     def poll(self):
         if self.online and self.mcConnection:
+            self.logger.debug("poll %s"%(self.gcUser,))
             self.mcConnection.poll()
                         
             
             
 class Config(object):
-    COMPONENT_NAME="tbd"
-    COMPONENT_SECRET="tbd"
     
     def __init__(self):
         self.users=[]
-        self.calcId()
         self.toXmpp=None
+        self.logger=logging.getLogger("Config")
+        self.COMPONENT_NAME="tbd"
+        self.COMPONENT_SECRET="tbd"
+        self.calcId()
+
         
     def calcId(self):
         self.bot=sleekxmpp.JID(self.COMPONENT_NAME+"/bot")
@@ -251,6 +282,7 @@ class Config(object):
                  }
         
         f=open("config","w")
+        self.logger.info("Stored config")
         json.dump(toStore,f,indent=4)
         f.close()
 
@@ -261,15 +293,17 @@ class Config(object):
             self.COMPONENT_NAME=myStore["COMPONENT_NAME"]
         if "COMPONENT_SECRET" in myStore:
             self.COMPONENT_SECRET=myStore["COMPONENT_SECRET"]
+        self.calcId()
         if self.toXmpp==None:
+            self.logger.info("Loaded config early")
             return
+        self.logger.info("Loaded config")
         
         if "users" in myStore:
             for userjson in myStore["users"]:
                 user=AUser(None,self.toXmpp)
                 user.load(userjson)
                 self.users.append(user)
-        self.calcId()
                 
     def delUser(self,jid):
         user=self._lookup(jid)
@@ -369,7 +403,8 @@ class MyComponent(ComponentXMPP):
         for user in self.config.users:
             if user.active:
                 botPresence=self.Presence()
-                botPresence['from']=self.config.bot.bare
+                botPresence['from']=self.config.bot.full
+                botPresence['to']=user.jid
                 botPresence['type']="unavailable"
                 botPresence.send()
         
@@ -379,46 +414,51 @@ class MyComponent(ComponentXMPP):
            if presence['type']=='probe':
                result=self.Presence()
                result['to']=presence['from']
-               result['from']=self.config.bot
+               result['from']=self.config.bot.full
                result['type']="available"
                result.send()
+           elif presence['type']=="subscribe":
+               result=self.Presence()
+               result['from']=self.config.bot
+               result['to']=presence['from']
+               result['type']="subscribe"                   
+               result.send()
+               result=self.Presence()
+               result['from']=self.config.bot
+               result['to']=presence['from']
+               result['type']="subscribed"                   
+               result.send()
+               result=self.Presence()
+               result['from']=self.config.bot
+               result['to']=presence['from']
+               result['type']="available"
+               result['status']="Just sitting here..."
+               self.config.addUser(presence['from'])
+               result.send()                   
+           elif presence['type']=="unsubscribe":
+               result=self.Presence()
+               result['from']=self.config.bot
+               result['to']=presence['from']
+               result['type']="unsubscribe"
+               result.send()
+               result=self.Presence()
+               result['type']="unsubscribed"
+               result['from']=self.config.bot
+               result['to']=presence['from']
+               self.config.delUser(presence['from'])
+               result.send()
+           elif presence['type']=="subscribed":
+               ## No further responce needed
+               pass
            else:
-               if presence['type']=="subscribe":
-                   result=self.Presence()
-                   result['from']=self.config.bot
-                   result['to']=presence['from']
-                   result['type']="subscribe"                   
-                   result.send()
-                   result=self.Presence()
-                   result['from']=self.config.bot
-                   result['to']=presence['from']
-                   result['type']="subscribed"                   
-                   result.send()
-                   result=self.Presence()
-                   result['from']=self.config.bot
-                   result['to']=presence['from']
-                   result['type']="available"
-                   result['status']="Just sitting here..."
-                   self.config.addUser(presence['from'])
-                   result.send()                   
-               elif presence['type']=="unsubscribe":
-                   result=self.Presence()
-                   result['from']=self.config.bot
-                   result['to']=presence['from']
-                   result['type']="unsubscribe"
-                   result.send()
-                   result=self.Presence()
-                   result['type']="unsubscribed"
-                   result['from']=self.config.bot
-                   result['to']=presence['from']
-                   self.config.delUser(presence['from'])
-                   result.send()
-               else:
-                   self.logger.warning("Presence not handled... %s",presence)
+               self.logger.warning("Presence not handled... %s",presence)
         else:
-            pass
-                   
-        pass
+            user=self.config.lookup(presence['from'])
+            if user:
+                user.handlePresence(presence)
+            else:
+                pass
+                
     def got_online(self,presence):
         user=self.config.lookup(presence['from'])
         if user and user.active:
@@ -452,40 +492,17 @@ class MyComponent(ComponentXMPP):
             ack['to']=message['from']
             ack['cm_displayed']=message['id']
             ack.send()
-        #TODO- put out admin commands
-        #TODO- move control to AUser        
-        if message['body']=="shutdown":
-            self.shutdown(None)
-            self.disconnect()
-        elif message['body']=="status":
+        if user.handleControlMsg(message):
+            return
+        if message['from'].bare==admin.bare:            
+            if message['body']=="shutdown":
+                self.shutdown(None)
+                self.disconnect()
+        else:
             message.reply()
-            message['body']="Geocaching user %s"%(user.gcUser,)
+            message['body']="Not authorized"
             message.send()
-            message['body']="Online :%s"%(user.mcConnection!=None,)
-            message.send()
-        elif message['body'].startswith("user "):
-            user.gcUser=message['body'][len("user "):]        
-        elif message['body'].startswith("pass "):
-            user.gcPass=message['body'][len("pass "):]
-            if user.online:
-                user.setOnline()
-        elif message['body']=="logout":
-            user.logout()
-        elif message['body']=="login":
-            user.login()            
-        elif message['body']=="poll":
-            user.poll()
-        elif message['body']=="ping":
-            self.schedule("reply after wait",10,self.delayReply,(message['from'],))
-            message.reply(body="pong").send()
-            
-    def delayReply(self,towards):
-        message=self.Message()
-        message['from']=self.config.bot
-        message['to']=towards
-        message['body']='After rethinking, i add...'
-        message.send()
-
+        
 
     def message_displayed(self,message):
         user=self.config.lookup(message['from'])
@@ -511,6 +528,9 @@ class MyComponent(ComponentXMPP):
             reply['error']['type']='cancel'
             reply['error']['text']='Bitte registrieren'
             reply.send()
+            reply2=message.reply()
+            reply2['body']="Bitte nimm den Service in deine Kontaktliste auf."
+            reply2.send()
             return
         
         if isBot(message):
@@ -537,12 +557,14 @@ if __name__ == '__main__':
     config=Config()
     config.load()
     c=MyComponent(config.COMPONENT_NAME,config.COMPONENT_SECRET,config)
-    config.load()
     config.setToXmpp(c)
+    config.load()
     config.store()
     
     c.registerPlugin('xep_0030')
-    c.registerPlugin('xep_0054')
+    c.registerPlugin('xep_0054')        
+    c.registerPlugin('xep_0153')
+    c.registerPlugin('xep_0115')
     c.registerPlugin('xep_0086')
     c.registerPlugin('xep_0199')
     c.registerPlugin('xep_0184')
@@ -551,8 +573,10 @@ if __name__ == '__main__':
     c['xep_0184'].auto_ack=False
     c['xep_0184'].auto_request=False
     c.registerPlugin('xep_0071')
+    c['xep_0153'].plugin_end()
     
     if c.connect():
+        
         c.process(block=True)
         print ("Done")
     else:
