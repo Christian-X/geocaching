@@ -12,6 +12,7 @@ import threading
 import api
 import base64
 import xep_0333
+import copy
 
 def isBot(stanza):
     return stanza['to'].user==config.bot.user
@@ -183,6 +184,37 @@ class AUser(object):
             
     def handlePresence(self,presence):
         self.logger.debug("Received presence: %s"%(presence,))
+        mcUser=None
+        try:
+            mcUser=self.mcConnection.getUserById(presence[to].user)
+        except Exception:
+            pass
+        if mcUser==None:
+            result=copy.copy(presence).reply()
+            result['type']=""
+            result['error']['type']='modify'
+            result['error']['condition']='user-not-found'
+            result.send()
+            return
+        #user does exist
+        if presence['type']=='probe':
+            result=copy.copy(presence).reply()
+            result['type']="available"
+            result.send()
+        elif presence['type']=="subscribe":
+            result=copy.copy(presence).reply()
+            result['type']="subscribe"                   
+            result.send()
+            result['type']="available"            
+            result.send()                         
+        elif presence['type']=="unsubscribe":
+            result=copy.copy(presence).reply()
+            result['type']="unsubscribe"
+            result.send()
+            result['type']="unsubscribed"
+            result.send()
+        else:
+            self.logger.debug("Unhandled presence")
         
     def updatePresence(self):
         for user in self.mcConnection.users.values():
@@ -553,7 +585,14 @@ class MyComponent(ComponentXMPP):
         self.xm.Process(10)
         
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.DEBUG,
+                        filename='transport.log')
+    console=logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    formater=logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
+    console.setFormatter(formater)
+    logging.getLogger('').addHandler(console)
+    logging.getLogger('').info("Starting up...")
     config=Config()
     config.load()
     c=MyComponent(config.COMPONENT_NAME,config.COMPONENT_SECRET,config)
