@@ -20,18 +20,22 @@ shortType={
            u'Webcam Cache':u'WEB'
 }
 
-class Cache:
-    name=""
-    code=""
-    found=""
-    ctype=""
-    hidden=""
-    d=""
-    t=""
-    lon=0
-    lat=0
-    distance=None
-    available=True
+class Cache(object):
+    
+    def __init__(self):        
+        self.name=""
+        self.code=""
+        self.found=""
+        self.ctype=""
+        self.hidden=""
+        self.d=""
+        self.t=""
+        self.lon=0
+        self.lat=0
+        self.distance=None
+        self.distanceRaw=None
+        self.available=True
+        self.logId=None
     
     def setAvailable(self,available):
         self.available=available
@@ -43,11 +47,17 @@ class Cache:
         if self.ctype in shortType:
             return shortType[self.ctype]
         return self.ctype
+    def getDistanceRaw(self):
+        if self.distanceRaw==None:
+            this=geo.xyz(self.lat,self.lon)
+            distance=int(geo.distance(this,home))
+            self.distanceRaw=distance
+            
+        return self.distanceRaw
     def getDistance(self):
         global home
         if self.distance==None:
-            this=geo.xyz(self.lat,self.lon)
-            distance=int(geo.distance(this,home))
+            distance=self.getDistanceRaw()
             if distance>10000:
                 self.distance="%s km"%(distance/1000,)
             else:
@@ -79,6 +89,8 @@ class Cache:
         self.ctype=ctype
     def setHidden(self,hidden):
         self.hidden=hidden
+    def setLogId(self,logId):
+        self.logId=logId
     def setFound(self,found):
         if found:
             found=found[0:10]
@@ -122,6 +134,7 @@ class Handler(xml.sax.ContentHandler):
             self.nextContentsTo=self.current.setT
         if name=="groundspeak:log":
             self.parsingLog=True
+            self.logId=int(attrs["id"])
         if name=="groundspeak:cache":
             self.parsingCache=True
             if "available" in attrs:
@@ -162,8 +175,9 @@ class Handler(xml.sax.ContentHandler):
             self.current=None
         if name=="groundspeak:log":
             self.parsingLog=False
-            if self.logType in ("Found it","Attended") and self.logDate and self.logFinder=="Lemarasic":
+            if self.logType in ("Found it","Attended","Webcam Photo Taken") and self.logDate and self.logFinder=="Lemarasic":
                 self.current.setFound(self.logDate)
+                self.current.setLogId(self.logId)
             self.logType=None
             self.logDate=None
         

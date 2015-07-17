@@ -2,15 +2,15 @@
 import api
 import sys
 a=api.GeocachingAPI()
-a.login("lemarasic","cache4us")
+a.login("lemarasic",sys.argv[1])
 pqs=a.listPQs()
-if len(sys.argv)==1:
+if len(sys.argv)==2:
     for p in pqs:
         print(p.name)
 
-if len(sys.argv)==3:
-    searchFor=sys.argv[1]
-    saveAs=sys.argv[2]
+if len(sys.argv)==4:
+    searchFor=sys.argv[2]
+    saveAs=sys.argv[3]
     numFound=0
     pqFound=0
     for p in pqs:
